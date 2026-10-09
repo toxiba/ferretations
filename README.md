@@ -17,7 +17,25 @@ Build the desktop app:
 npm run build
 ```
 
-Run the built app with `npm start`. `npm run dist:mac` and `npm run dist:win` build installable packages for macOS and Windows respectively.
+Run the built app with `npm start`.
+
+## Build installers
+
+Install dependencies with `npm install`, then create platform-specific installers:
+
+On an Apple Silicon Mac, create the macOS disk image and ZIP for the Apple Silicon (`arm64`) architecture:
+
+```sh
+npm run dist:mac -- --arm64
+```
+
+On Windows, create the 64-bit Windows installer:
+
+```sh
+npm run dist:win -- --x64
+```
+
+Builds are written to `dist/`. The macOS command targets Apple Silicon, not Intel (`x64`) Macs; the Windows command creates an NSIS `.exe` installer.
 
 ## First launch and library layout
 
