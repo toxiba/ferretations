@@ -1,6 +1,6 @@
-# Ferretations
+# Super Weird Notes
 
-Ferretations is a local-first desktop workspace for work notes. It stores notes as ordinary Markdown files and organizes them into Projects, so the library remains portable and readable without the app.
+Super Weird Notes is a local-first desktop workspace for work notes. It stores notes as ordinary Markdown files and organizes them into Projects, so the library remains portable and readable without the app.
 
 ## Run locally
 

@@ -1,5 +1,5 @@
 {
-  "name": "ferretations",
+  "name": "super-weird-notes",
   "version": "0.1.0",
   "private": true,
   "description": "A local-first notes workspace for work projects.",
@@ -34,8 +34,8 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "com.ferretations.desktop",
-    "productName": "Ferretations",
+    "appId": "com.superweirdnotes.desktop",
+    "productName": "Super Weird Notes",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",

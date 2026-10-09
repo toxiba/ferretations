@@ -195,10 +195,13 @@ function App() {
   });
 
   useEffect(() => {
-    const savedTabs = localStorage.getItem("ferretations.tabs");
-    const savedSelection = localStorage.getItem("ferretations.selected");
-    const savedProject = localStorage.getItem("ferretations.project");
-    const savedView = localStorage.getItem("ferretations.view") as View | null;
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("ferretations.")) localStorage.removeItem(key);
+    }
+    const savedTabs = localStorage.getItem("superWeirdNotes.tabs");
+    const savedSelection = localStorage.getItem("superWeirdNotes.selected");
+    const savedProject = localStorage.getItem("superWeirdNotes.project");
+    const savedView = localStorage.getItem("superWeirdNotes.view") as View | null;
     if (savedTabs) setTabs(JSON.parse(savedTabs) as string[]);
     if (savedSelection) setSelectedId(savedSelection);
     if (savedProject) setProjectFilter(savedProject);
@@ -214,12 +217,12 @@ function App() {
 
   useEffect(() => {
     if (!workspaceRestored) return;
-    localStorage.setItem("ferretations.tabs", JSON.stringify(tabs));
-    if (selectedId) localStorage.setItem("ferretations.selected", selectedId);
-    else localStorage.removeItem("ferretations.selected");
-    if (projectFilter) localStorage.setItem("ferretations.project", projectFilter);
-    else localStorage.removeItem("ferretations.project");
-    localStorage.setItem("ferretations.view", view);
+    localStorage.setItem("superWeirdNotes.tabs", JSON.stringify(tabs));
+    if (selectedId) localStorage.setItem("superWeirdNotes.selected", selectedId);
+    else localStorage.removeItem("superWeirdNotes.selected");
+    if (projectFilter) localStorage.setItem("superWeirdNotes.project", projectFilter);
+    else localStorage.removeItem("superWeirdNotes.project");
+    localStorage.setItem("superWeirdNotes.view", view);
   }, [tabs, selectedId, projectFilter, view, workspaceRestored]);
 
   const activeNote = selectedId ? drafts[selectedId] : undefined;
@@ -621,7 +624,7 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <button className="wordmark" onClick={() => selectProject(null)} aria-label="All notes">
-          <span className="brand-mark small">f.</span><span>ferretations</span>
+          <span className="brand-mark small">s.</span><span>Super Weird Notes</span>
         </button>
         <div className="global-search">
           <span className="search-icon">⌕</span>
@@ -787,7 +790,7 @@ function App() {
                     : <button className="icon-button danger-text" onClick={() => void deleteSelected()} title="Move note to Trash">⌑</button>}
                 </div>
               </div>
-              {activeConflict && <div className="conflict-banner"><span>{missingNotes.has(activeNote.id) ? "This note was moved or removed outside Ferretations. Your edits are safe locally." : "This note changed outside Ferretations. Your edits are safe locally."}</span>
+              {activeConflict && <div className="conflict-banner"><span>{missingNotes.has(activeNote.id) ? "This note was moved or removed outside Super Weird Notes. Your edits are safe locally." : "This note changed outside Super Weird Notes. Your edits are safe locally."}</span>
                 {missingNotes.has(activeNote.id)
                   ? <button onClick={() => void recoverMissingNote()}>Save as a new note</button>
                   : <>

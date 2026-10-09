@@ -655,7 +655,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: "#111318",
-    title: "Ferretations",
+    title: "Super Weird Notes",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
