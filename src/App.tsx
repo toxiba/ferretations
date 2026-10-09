@@ -598,7 +598,7 @@ function App() {
   if (!rootSelected) {
     return (
       <main className="welcome-screen">
-        <div className="brand-mark">f.</div>
+        <div className="brand-mark">s.</div>
         <p className="eyebrow">YOUR LOCAL WORKSPACE</p>
         <h1>All your work notes,<br />in one place.</h1>
         <p className="welcome-copy">A calm, searchable home for task notes, project files, links and the little details you’ll need later.</p>
