@@ -95,15 +95,15 @@ function safeReadDir(directory) {
         return [];
     }
 }
-function filesIn(directory, relative = "") {
+function filesIn(directory, relative = "", includeHidden = false) {
     const output = [];
     for (const entry of safeReadDir(directory)) {
-        if (entry.name.startsWith("."))
+        if (!includeHidden && entry.name.startsWith("."))
             continue;
         const childRelative = node_path_1.default.join(relative, entry.name);
         const fullPath = node_path_1.default.join(directory, entry.name);
         if (entry.isDirectory())
-            output.push(...filesIn(fullPath, childRelative));
+            output.push(...filesIn(fullPath, childRelative, includeHidden));
         else
             output.push(childRelative);
     }
@@ -303,8 +303,8 @@ function expectedNoteFilename(title, id) {
 function notePath(project, title, id) {
     return node_path_1.default.join(projectDir(project), "Notes", expectedNoteFilename(title, id));
 }
-function assertUniqueNote(id, targetPath) {
-    const collision = noteRecords().find((note) => note.id === id && note.path !== targetPath);
+function assertUniqueNote(id, targetPath, currentPath) {
+    const collision = noteRecords().find((note) => note.id === id && note.path !== targetPath && note.path !== currentPath);
     if (collision)
         throw new Error(`A note with id ${id} already exists.`);
 }
@@ -352,8 +352,52 @@ function registerHandlers() {
         const directory = projectDir(name);
         if (!node_fs_1.default.existsSync(directory))
             throw new Error("Project not found.");
-        if (filesIn(directory).length > 0)
-            throw new Error("Move or delete all Project files before deleting this Project.");
+        const notes = noteRecords().filter((note) => note.project === name && !note.deleted);
+        const managedFiles = new Set(notes.map((note) => node_path_1.default.relative(directory, note.path)));
+        for (const note of notes) {
+            if (!note.attachmentsPath || !node_fs_1.default.existsSync(note.attachmentsPath))
+                continue;
+            for (const attachment of filesIn(note.attachmentsPath, "", true)) {
+                managedFiles.add(node_path_1.default.relative(directory, node_path_1.default.join(note.attachmentsPath, attachment)));
+            }
+        }
+        const otherFiles = filesIn(directory, "", true).filter((file) => !managedFiles.has(file));
+        if (otherFiles.length > 0)
+            throw new Error("Move or delete all non-note Project files before deleting this Project.");
+        const unassignedDirectory = ensureProject(UNASSIGNED);
+        const moves = [];
+        const destinations = new Set();
+        const addMove = (source, destination) => {
+            if (node_fs_1.default.existsSync(destination) || destinations.has(destination)) {
+                throw new Error("A note or attachment already exists in Unassigned.");
+            }
+            destinations.add(destination);
+            moves.push({ source, destination });
+        };
+        for (const note of notes) {
+            const target = node_path_1.default.join(unassignedDirectory, "Notes", node_path_1.default.basename(note.path));
+            assertUniqueNote(note.id, target, note.path);
+            addMove(note.path, target);
+            if (note.attachmentsPath && node_fs_1.default.existsSync(note.attachmentsPath)) {
+                addMove(note.attachmentsPath, node_path_1.default.join(unassignedDirectory, "Attachments", note.id));
+            }
+        }
+        const completedMoves = [];
+        try {
+            for (const move of moves) {
+                node_fs_1.default.renameSync(move.source, move.destination);
+                completedMoves.push(move);
+            }
+        }
+        catch (error) {
+            for (const move of completedMoves.reverse()) {
+                if (node_fs_1.default.existsSync(move.destination) && !node_fs_1.default.existsSync(move.source)) {
+                    node_fs_1.default.mkdirSync(node_path_1.default.dirname(move.source), { recursive: true });
+                    node_fs_1.default.renameSync(move.destination, move.source);
+                }
+            }
+            throw error;
+        }
         node_fs_1.default.rmSync(directory, { recursive: true });
         notifyChanged();
     });
@@ -435,7 +479,7 @@ function registerHandlers() {
         const target = titleChanged
             ? notePath(note.project, note.title, note.id)
             : node_path_1.default.join(projectDir(note.project), "Notes", node_path_1.default.basename(current.path));
-        assertUniqueNote(note.id, target);
+        assertUniqueNote(note.id, target, current.path);
         const previousProject = current.project;
         const nextAttachments = node_path_1.default.join(projectDir(note.project), "Attachments", note.id);
         if (previousProject !== note.project && node_fs_1.default.existsSync(current.attachmentsPath) && node_fs_1.default.existsSync(nextAttachments)) {

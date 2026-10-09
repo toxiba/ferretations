@@ -100,13 +100,13 @@ function safeReadDir(directory: string): fs.Dirent[] {
   }
 }
 
-function filesIn(directory: string, relative = ""): string[] {
+function filesIn(directory: string, relative = "", includeHidden = false): string[] {
   const output: string[] = [];
   for (const entry of safeReadDir(directory)) {
-    if (entry.name.startsWith(".")) continue;
+    if (!includeHidden && entry.name.startsWith(".")) continue;
     const childRelative = path.join(relative, entry.name);
     const fullPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) output.push(...filesIn(fullPath, childRelative));
+    if (entry.isDirectory()) output.push(...filesIn(fullPath, childRelative, includeHidden));
     else output.push(childRelative);
   }
   return output;
@@ -310,8 +310,10 @@ function notePath(project: string, title: string, id: string) {
   return path.join(projectDir(project), "Notes", expectedNoteFilename(title, id));
 }
 
-function assertUniqueNote(id: string, targetPath: string) {
-  const collision = noteRecords().find((note) => note.id === id && note.path !== targetPath);
+function assertUniqueNote(id: string, targetPath: string, currentPath: string) {
+  const collision = noteRecords().find((note) =>
+    note.id === id && note.path !== targetPath && note.path !== currentPath,
+  );
   if (collision) throw new Error(`A note with id ${id} already exists.`);
 }
 
@@ -351,7 +353,51 @@ function registerHandlers() {
     if (name === UNASSIGNED) throw new Error("Unassigned cannot be deleted.");
     const directory = projectDir(name);
     if (!fs.existsSync(directory)) throw new Error("Project not found.");
-    if (filesIn(directory).length > 0) throw new Error("Move or delete all Project files before deleting this Project.");
+    const notes = noteRecords().filter((note) => note.project === name && !note.deleted);
+    const managedFiles = new Set(notes.map((note) => path.relative(directory, note.path)));
+    for (const note of notes) {
+      if (!note.attachmentsPath || !fs.existsSync(note.attachmentsPath)) continue;
+      for (const attachment of filesIn(note.attachmentsPath, "", true)) {
+        managedFiles.add(path.relative(directory, path.join(note.attachmentsPath, attachment)));
+      }
+    }
+    const otherFiles = filesIn(directory, "", true).filter((file) => !managedFiles.has(file));
+    if (otherFiles.length > 0) throw new Error("Move or delete all non-note Project files before deleting this Project.");
+
+    const unassignedDirectory = ensureProject(UNASSIGNED);
+    const moves: { source: string; destination: string }[] = [];
+    const destinations = new Set<string>();
+    const addMove = (source: string, destination: string) => {
+      if (fs.existsSync(destination) || destinations.has(destination)) {
+        throw new Error("A note or attachment already exists in Unassigned.");
+      }
+      destinations.add(destination);
+      moves.push({ source, destination });
+    };
+    for (const note of notes) {
+      const target = path.join(unassignedDirectory, "Notes", path.basename(note.path));
+      assertUniqueNote(note.id, target, note.path);
+      addMove(note.path, target);
+      if (note.attachmentsPath && fs.existsSync(note.attachmentsPath)) {
+        addMove(note.attachmentsPath, path.join(unassignedDirectory, "Attachments", note.id));
+      }
+    }
+
+    const completedMoves: typeof moves = [];
+    try {
+      for (const move of moves) {
+        fs.renameSync(move.source, move.destination);
+        completedMoves.push(move);
+      }
+    } catch (error) {
+      for (const move of completedMoves.reverse()) {
+        if (fs.existsSync(move.destination) && !fs.existsSync(move.source)) {
+          fs.mkdirSync(path.dirname(move.source), { recursive: true });
+          fs.renameSync(move.destination, move.source);
+        }
+      }
+      throw error;
+    }
     fs.rmSync(directory, { recursive: true });
     notifyChanged();
   });
@@ -427,7 +473,7 @@ function registerHandlers() {
     const target = titleChanged
       ? notePath(note.project, note.title, note.id)
       : path.join(projectDir(note.project), "Notes", path.basename(current.path));
-    assertUniqueNote(note.id, target);
+    assertUniqueNote(note.id, target, current.path);
     const previousProject = current.project;
     const nextAttachments = path.join(projectDir(note.project), "Attachments", note.id);
     if (previousProject !== note.project && fs.existsSync(current.attachmentsPath!) && fs.existsSync(nextAttachments)) {
