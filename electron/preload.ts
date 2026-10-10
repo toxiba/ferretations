@@ -17,11 +17,8 @@ contextBridge.exposeInMainWorld("workspace", {
   importNotes: (items: ImportItem[]) =>
     ipcRenderer.invoke("import:notes", items),
   chooseImportFiles: () => ipcRenderer.invoke("import:choose-files"),
-  addFiles: (project: string) => ipcRenderer.invoke("files:add", project),
   openPath: (path: string) => ipcRenderer.invoke("files:open", path),
   openExternal: (url: string) => ipcRenderer.invoke("links:open-external", url),
-  addAttachment: (noteId: string) =>
-    ipcRenderer.invoke("attachment:add", noteId),
   onChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on("workspace:changed", listener);
@@ -52,8 +49,6 @@ export interface NoteRecord {
   path: string;
   deleted: boolean;
   originalProject?: string;
-  attachmentsPath?: string;
-  attachments: string[];
   fileNameMismatch?: boolean;
 }
 
@@ -64,7 +59,6 @@ export interface ImportItem {
 
 export interface ProjectRecord {
   name: string;
-  files: string[];
   notes: number;
 }
 
@@ -73,14 +67,6 @@ export interface Snapshot {
   projects: ProjectRecord[];
   notes: NoteRecord[];
   noteTypes: string[];
-  indexedFiles: SearchFile[];
-}
-
-export interface SearchFile {
-  project: string;
-  path: string;
-  content: string;
-  contentTruncated: boolean;
 }
 
 declare global {
@@ -100,10 +86,8 @@ declare global {
       emptyTrash(): Promise<void>;
       importNotes(items: ImportItem[]): Promise<number>;
       chooseImportFiles(): Promise<string[]>;
-      addFiles(project: string): Promise<number>;
       openPath(path: string): Promise<void>;
       openExternal(url: string): Promise<void>;
-      addAttachment(noteId: string): Promise<string | null>;
       onChanged(callback: () => void): () => void;
     };
   }

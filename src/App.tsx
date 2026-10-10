@@ -1,9 +1,9 @@
-import { marked } from "marked";
-import DOMPurify from "dompurify";
+import Editor from "@monaco-editor/react";
+import type { editor as MonacoEditorApi, IDisposable } from "monaco-editor";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ImportItem, NoteRecord, ProjectRecord, Snapshot } from "../electron/preload";
 
-type View = "all" | "dates" | "types" | "files" | "trash";
+type View = "all" | "dates" | "types" | "trash";
 type LinkField = "prs" | "docs";
 type SidebarSection = "dates" | "types";
 type ProjectDialogState = {
@@ -11,6 +11,47 @@ type ProjectDialogState = {
   project: ProjectRecord | null;
   value: string;
 };
+type MonacoFindController = {
+  start(options: {
+    forceRevealReplace: boolean;
+    seedSearchStringFromSelection: "single" | "none";
+    seedSearchStringFromNonEmptySelection: boolean;
+    seedSearchStringFromGlobalClipboard: boolean;
+    shouldFocus: 1;
+    shouldAnimate: boolean;
+    updateSearchScope: boolean;
+    loop: boolean;
+  }): Promise<void>;
+};
+
+const defaultEditorOptions = {
+  automaticLayout: true,
+  minimap: { 
+    enabled: false
+  },
+  lineNumbers: "on",
+  scrollBeyondLastLine: false,
+  fontSize: 13,
+  wordWrap: "off",
+  quickSuggestions: false,
+  suggestOnTriggerCharacters: false,
+  wordBasedSuggestions: "off",
+  parameterHints: { 
+    enabled: false
+  },
+  hover: { 
+    enabled: "off" 
+  },
+  padding: { 
+    top: 12, bottom: 12 
+  },
+  fixedOverflowWidgets: true,
+  scrollbar: { 
+    vertical: "hidden",
+    horizontal: "hidden", 
+    handleMouseWheel: true
+  }
+} as MonacoEditorApi.IEditorOptions;
 
 function normalizeProjectName(value: string) {
   return value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-");
@@ -32,7 +73,6 @@ const emptySnapshot: Snapshot = {
   projects: [],
   notes: [],
   noteTypes: [],
-  indexedFiles: [],
 };
 
 function sameContent(a: NoteRecord, b: NoteRecord) {
@@ -88,22 +128,32 @@ function App() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [bodyFindOpen, setBodyFindOpen] = useState(false);
-  const [bodyFindQuery, setBodyFindQuery] = useState("");
-  const [bodyFindMatchIndex, setBodyFindMatchIndex] = useState(-1);
+  const [editorOptions, setEditorOptions] = useState<MonacoEditorApi.IEditorOptions>(() => {
+    try {
+      const saved = localStorage.getItem("superWeirdNotes.editorOptions");
+      if (!saved) return defaultEditorOptions;
+      const parsed = JSON.parse(saved) as Record<string, unknown>;
+      const { readOnly: _readOnly, ...options } = parsed;
+      return options as MonacoEditorApi.IEditorOptions;
+    } catch {
+      return defaultEditorOptions;
+    }
+  });
+  const [editorOptionsOpen, setEditorOptionsOpen] = useState(false);
+  const [editorOptionsDraft, setEditorOptionsDraft] = useState("");
+  const [editorOptionsError, setEditorOptionsError] = useState("");
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [conflicts, setConflicts] = useState<Set<string>>(new Set());
   const [missingNotes, setMissingNotes] = useState<Set<string>>(new Set());
-  const [preview, setPreview] = useState(false);
   const [noteDetailsCollapsed, setNoteDetailsCollapsed] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
   const [importPaths, setImportPaths] = useState<string[]>([]);
   const [importProjects, setImportProjects] = useState<Record<string, string>>({});
-  const [renderedMarkdown, setRenderedMarkdown] = useState("");
-  const markdownEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const bodyFindInputRef = useRef<HTMLInputElement | null>(null);
+  const [editorBodyHeight, setEditorBodyHeight] = useState(180);
+  const noteEditorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null);
+  const editorContentSizeListener = useRef<IDisposable | null>(null);
   const autosaveTimer = useRef<number | undefined>(undefined);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -181,14 +231,10 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && activeNote && !activeNote.deleted) {
+      if (!editorOptionsOpen && (event.metaKey || event.ctrlKey) && activeNote && !activeNote.deleted && ["f", "h"].includes(event.key.toLowerCase())) {
         event.preventDefault();
-        setBodyFindOpen(true);
-        setPreview(false);
-      }
-      if (bodyFindOpen && event.key === "Enter") {
-        event.preventDefault();
-        moveToBodyFindMatch(event.shiftKey ? -1 : 1);
+        event.stopPropagation();
+        openEditorFind(event.key.toLowerCase() === "h");
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -200,20 +246,15 @@ function App() {
       }
       if (event.key === "Escape") {
         setOpenProjectMenu(null);
-        if (bodyFindOpen) setBodyFindOpen(false);
       }
       if (event.key === "Escape" && document.activeElement?.classList.contains("global-search")) {
         setSearch("");
         document.activeElement instanceof HTMLElement && document.activeElement.blur();
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   });
-
-  useEffect(() => {
-    if (bodyFindOpen) bodyFindInputRef.current?.focus();
-  }, [bodyFindOpen]);
 
   useEffect(() => {
     for (const key of Object.keys(localStorage)) {
@@ -226,7 +267,7 @@ function App() {
     if (savedTabs) setTabs(JSON.parse(savedTabs) as string[]);
     if (savedSelection) setSelectedId(savedSelection);
     if (savedProject) setProjectFilter(savedProject);
-    if (savedView && ["all", "dates", "types", "files", "trash"].includes(savedView)) {
+    if (savedView && ["all", "dates", "types", "trash"].includes(savedView)) {
       setView(savedView);
       if (savedView === "dates" || savedView === "types") {
         setActiveBrowseSection(savedView);
@@ -248,47 +289,58 @@ function App() {
 
   const activeNote = selectedId ? drafts[selectedId] : undefined;
   useEffect(() => {
-    setBodyFindOpen(false);
-    setBodyFindQuery("");
-    setBodyFindMatchIndex(-1);
+    noteEditorRef.current?.layout();
   }, [selectedId]);
 
-  const bodyFindMatches = useMemo(() => {
-    if (!activeNote || !bodyFindQuery) return [];
-    const body = activeNote.body.toLocaleLowerCase();
-    const query = bodyFindQuery.toLocaleLowerCase();
-    const matches: number[] = [];
-    let position = 0;
-    while ((position = body.indexOf(query, position)) !== -1) {
-      matches.push(position);
-      position += query.length;
-    }
-    return matches;
-  }, [activeNote?.body, bodyFindQuery]);
+  useLayoutEffect(() => {
+    noteEditorRef.current?.layout();
+  }, [selectedId]);
 
-  const moveToBodyFindMatch = (direction: number) => {
-    if (!bodyFindMatches.length) return;
-    const nextIndex = bodyFindMatchIndex < 0
-      ? direction > 0 ? 0 : bodyFindMatches.length - 1
-      : (bodyFindMatchIndex + direction + bodyFindMatches.length) % bodyFindMatches.length;
-    setBodyFindMatchIndex(nextIndex);
-    const editor = markdownEditorRef.current;
-    const start = bodyFindMatches[nextIndex];
+  useEffect(() => () => editorContentSizeListener.current?.dispose(), []);
+
+  const openEditorFind = (replace = false) => {
+    const editor = noteEditorRef.current;
     editor?.focus();
-    editor?.setSelectionRange(start, start + bodyFindQuery.length);
+    const findController = editor?.getContribution("editor.contrib.findController") as MonacoFindController | null | undefined;
+    void findController?.start({
+      forceRevealReplace: replace,
+      seedSearchStringFromSelection: "single",
+      seedSearchStringFromNonEmptySelection: false,
+      seedSearchStringFromGlobalClipboard: false,
+      shouldFocus: 1,
+      shouldAnimate: true,
+      updateSearchScope: false,
+      loop: true,
+    });
   };
 
-  useLayoutEffect(() => {
-    const editor = markdownEditorRef.current;
-    if (!editor) return;
-    editor.style.height = "auto";
-    editor.style.height = `${editor.scrollHeight}px`;
-  }, [activeNote?.body, selectedId, preview]);
+  const editEditorOptions = () => {
+    setEditorOptionsDraft(JSON.stringify(editorOptions, null, 2));
+    setEditorOptionsError("");
+    setEditorOptionsOpen(true);
+  };
+
+  const applyEditorOptions = () => {
+    try {
+      const parsed: unknown = JSON.parse(editorOptionsDraft);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Options must be a JSON object.");
+      }
+      if (Object.hasOwn(parsed, "readOnly")) {
+        throw new Error("readOnly is managed by note state and cannot be customized.");
+      }
+      const options = parsed as MonacoEditorApi.IEditorOptions;
+      localStorage.setItem("superWeirdNotes.editorOptions", JSON.stringify(options));
+      setEditorOptions(options);
+      setEditorOptionsOpen(false);
+    } catch (error) {
+      setEditorOptionsError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const openNote = (id: string) => {
     setSelectedId(id);
     setTabs((current) => current.includes(id) ? current : [...current, id]);
-    setPreview(false);
     setView("all");
     setMessage("");
   };
@@ -338,36 +390,6 @@ function App() {
     return () => window.clearTimeout(autosaveTimer.current);
   }, [activeNote, dirty, conflicts, saveNote]);
 
-  useEffect(() => {
-    let alive = true;
-    async function renderBody() {
-      if (!activeNote) {
-        setRenderedMarkdown("");
-        return;
-      }
-      const source = activeNote.body.replace(
-        /\.\.\/Attachments\/([^/]+)\/([^)\s]+)/g,
-        (_match, id: string, filename: string) => {
-          let decodedFilename = filename;
-          try {
-            decodedFilename = decodeURIComponent(filename);
-          } catch {
-            // Keep malformed external Markdown paths as literal filenames.
-          }
-          return `ferretation-attachment://${encodeURIComponent(id)}/${encodeURIComponent(decodedFilename)}`;
-        },
-      );
-      const html = await marked.parse(source);
-      if (alive) {
-        setRenderedMarkdown(DOMPurify.sanitize(html, {
-          ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|ferretation-attachment):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
-        }));
-      }
-    }
-    void renderBody();
-    return () => { alive = false; };
-  }, [activeNote?.body, activeNote?.id]);
-
   const filteredNotes = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return snapshot.notes.filter((note) => {
@@ -395,18 +417,6 @@ function App() {
       return haystack.includes(query);
     }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }, [snapshot.notes, view, projectFilter, typeFilter, statusFilter, dateFilter, search]);
-
-  const filteredFiles = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    return snapshot.indexedFiles.filter((file) => {
-      if (projectFilter && file.project !== projectFilter) return false;
-      if (!query) return true;
-      return `${file.project} ${file.path} ${file.content}`.toLocaleLowerCase().includes(query);
-    });
-  }, [snapshot.indexedFiles, projectFilter, search]);
-
-  const displayedNotes = view === "files" ? [] : filteredNotes;
-  const displayFiles = search.trim() ? filteredFiles : view === "files" ? filteredFiles : [];
 
   const doChooseRoot = async () => {
     try {
@@ -543,17 +553,6 @@ function App() {
     }
   };
 
-  const addFiles = async (project: string) => {
-    setOpenProjectMenu(null);
-    try {
-      const count = await window.workspace.addFiles(project);
-      if (count) setMessage(`Added ${count} file${count === 1 ? "" : "s"} to ${project}.`);
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const emptyTrash = async () => {
     setOpenProjectMenu(null);
     if (!window.confirm("Permanently delete everything in Trash? This cannot be undone.")) return;
@@ -607,16 +606,6 @@ function App() {
     }
   };
 
-  const addAttachment = async () => {
-    if (!activeNote) return;
-    try {
-      const markdown = await window.workspace.addAttachment(activeNote.id);
-      if (markdown) updateNote({ body: `${activeNote.body}${activeNote.body ? "\n\n" : ""}${markdown}\n` });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const selectProject = (name: string | null) => {
     setOpenProjectMenu(null);
     setActiveBrowseSection(null);
@@ -629,7 +618,7 @@ function App() {
     setView("all");
   };
 
-  const openExternal = async (path: string) => {
+  const openLibraryPath = async (path: string) => {
     try {
       await window.workspace.openPath(path);
     } catch (error) {
@@ -652,9 +641,9 @@ function App() {
         <div className="brand-mark">s.</div>
         <p className="eyebrow">YOUR LOCAL WORKSPACE</p>
         <h1>All your work notes,<br />in one place.</h1>
-        <p className="welcome-copy">A calm, searchable home for task notes, project files, links and the little details you’ll need later.</p>
+        <p className="welcome-copy">A calm, searchable home for task notes, project links and the little details you’ll need later.</p>
         <button className="primary-button welcome-button" onClick={() => void doChooseRoot()}>Choose library folder <span>→</span></button>
-        <p className="subtle">Your notes stay on this device as regular Markdown files.</p>
+        <p className="subtle">Your notes stay on this device as ordinary text files.</p>
         {message && <p className="error-message">{message}</p>}
       </main>
     );
@@ -682,7 +671,7 @@ function App() {
           <input value={search} onChange={(event) => {
             setSearch(event.target.value);
             if (event.target.value.trim()) setResultsVisible(true);
-          }} placeholder="Search notes, work items, branches, files…" />
+          }} placeholder="Search notes, work items, branches…" />
           {search && <button className="clear-search-button" onClick={() => setSearch("")} title="Clear search" aria-label="Clear search">×</button>}
           <kbd>⌘ K</kbd>
         </div>
@@ -752,7 +741,6 @@ function App() {
                     <button role="menuitem" onClick={() => openRenameProject(project)}>Rename</button>
                     <button role="menuitem" onClick={() => { setOpenProjectMenu(null); void createNote(project.name); }}>Create note</button>
                   </>}
-                  <button role="menuitem" onClick={() => void addFiles(project.name)}>Add files</button>
                   {project.name !== "Unassigned" && <button className="danger-text" role="menuitem" onClick={() => {
                     setOpenProjectMenu(null);
                     setProjectDialogError("");
@@ -764,7 +752,7 @@ function App() {
           </div>
         </div>
         <div className="sidebar-bottom">
-          <div className="library-location"><span className="online-dot" /> Library <span title={snapshot.root}>{snapshot.root.split(/[\\/]/).at(-1)}</span></div>
+          <button className="library-location" onClick={() => void openLibraryPath(snapshot.root)} title={`Open library folder: ${snapshot.root}`} aria-label={`Open library folder ${snapshot.root}`}><span className="online-dot" /> Library <span>{snapshot.root.split(/[\\/]/).at(-1)}</span></button>
           <button className="import-link" onClick={() => void startImport()}>⇧ &nbsp;Import notes</button>
         </div>
       </aside>
@@ -798,7 +786,7 @@ function App() {
             </div>
             {view !== "types" || typeFilter ? (
               <div className="result-list">
-                {displayedNotes.filter((note) => typeFilter !== "__untyped" || !note.type).map((note) => (
+                {filteredNotes.filter((note) => typeFilter !== "__untyped" || !note.type).map((note) => (
                   <button key={`${note.id}-${note.deleted}`} className={`note-card ${selectedId === note.id ? "active" : ""} ${note.deleted ? "is-deleted" : ""}`} onClick={() => openNote(note.id)}>
                     <div className="note-card-top"><span className="note-type">{note.type || "Unclassified"}</span><span className={`status-pill ${note.status.toLowerCase()}`}>{note.deleted ? "Deleted" : note.status}</span></div>
                     <h3>{note.title}</h3>
@@ -806,12 +794,7 @@ function App() {
                     <div className="note-card-bottom"><span className="project-tag">{note.project}</span>{note.workItemId && <span className="work-item">#{note.workItemId}</span>}<span className="card-date">{formatDate(note.createdAt)}</span></div>
                   </button>
                 ))}
-                {displayFiles.map((file) => (
-                  <button key={`${file.project}/${file.path}`} className="file-result" onClick={() => void openExternal(`${snapshot.root}/Projects/${file.project}/Files/${file.path}`)}>
-                    <span className="file-icon">▧</span>                    <span><strong>{file.path}</strong><small>{file.project}{file.content && ` · ${file.content.slice(0, 90).replace(/\s+/g, " ")}`}{file.contentTruncated && " · content index limited to first 500 KB"}</small></span><span>↗</span>
-                  </button>
-                ))}
-                {!displayedNotes.length && !displayFiles.length && <div className="empty-state"><div className="empty-icon">⌕</div><h3>No notes found</h3><p>Try another search or create a note to capture something.</p><button className="secondary-button" onClick={() => void createNote()}>＋ Create a note</button></div>}
+                {!filteredNotes.filter((note) => typeFilter !== "__untyped" || !note.type).length && <div className="empty-state"><div className="empty-icon">⌕</div><h3>No notes found</h3><p>Try another search or create a note to capture something.</p><button className="secondary-button" onClick={() => void createNote()}>＋ Create a note</button></div>}
               </div>
             ) : null}
           </section>}
@@ -824,7 +807,7 @@ function App() {
                     const note = drafts[id];
                     if (!note) return null;
                     return <div className={`editor-tab ${id === selectedId ? "current" : ""}`} key={id}>
-                      <button className="tab-title" title={`${note.title} (${note.project})`} onClick={() => setSelectedId(id)} aria-label={`Open ${note.title} in ${note.project}`}><span className="tab-note-title">{note.title}</span><span className="tab-project-title">({note.project})</span></button>
+                      <button className="tab-title" title={`${note.title} (${note.project})`} onClick={() => setSelectedId(id)} onDoubleClick={() => setResultsVisible(false)} aria-label={`Open ${note.title} in ${note.project}`}><span className="tab-note-title">{note.title}</span><span className="tab-project-title">({note.project})</span></button>
                       <button className="tab-close" onClick={() => closeTab(id)} aria-label={`Close ${note.title}`}>×</button>
                     </div>;
                   })}
@@ -835,7 +818,7 @@ function App() {
                     : activeDirty
                       ? <span className="save-indicator"><i /> {activeConflict ? "Conflict" : "Saving…"}</span>
                       : <span className="save-indicator saved"><i /> Saved</span>}
-                  {!activeNote.deleted && <button className={`icon-button ${preview ? "pressed" : ""}`} onClick={() => setPreview(!preview)} title="Toggle Markdown preview">◫</button>}
+                      {!activeNote.deleted && <button className="icon-button" onClick={editEditorOptions} title="Editor options" aria-label="Editor options">⚙</button>}
                   {!activeNote.deleted && <button className={`icon-button ${noteDetailsCollapsed ? "pressed" : ""}`} onClick={() => setNoteDetailsCollapsed(!noteDetailsCollapsed)} title={`${noteDetailsCollapsed ? "Show" : "Hide"} note details`} aria-label={`${noteDetailsCollapsed ? "Show" : "Hide"} note details`} aria-pressed={!noteDetailsCollapsed}>{noteDetailsCollapsed ? "▤" : "▱"}</button>}
                   {activeNote.deleted
                     ? <button className="secondary-button restore-button" onClick={() => void restoreSelected()}>Restore note</button>
@@ -880,36 +863,38 @@ function App() {
                   </>}
                 </div>
                 {!activeNote.deleted && <div className="body-toolbar">
-                  <span>NOTE BODY <span className="markdown-mark">M↓</span></span>
-                  <div className="body-toolbar-actions">
-                    {bodyFindOpen && <div className="body-find" role="search">
-                      <input ref={bodyFindInputRef} value={bodyFindQuery} onChange={(event) => { setBodyFindQuery(event.target.value); setBodyFindMatchIndex(-1); }} placeholder="Find in note…" aria-label="Find in note body" />
-                      <span>{bodyFindQuery ? `${Math.max(bodyFindMatchIndex + 1, 0)} / ${bodyFindMatches.length}` : ""}</span>
-                      <button className="find-nav-button" onClick={() => moveToBodyFindMatch(-1)} title="Previous match" aria-label="Previous match">↑</button>
-                      <button className="find-nav-button" onClick={() => moveToBodyFindMatch(1)} title="Next match" aria-label="Next match">↓</button>
-                      <button className="find-nav-button" onClick={() => setBodyFindOpen(false)} title="Close find" aria-label="Close find">×</button>
-                    </div>}
-                    <button className="subtle-action" onClick={() => void addAttachment()}>＋ Attach</button>
-                    <button className={`subtle-action ${preview ? "on" : ""}`} onClick={() => setPreview(!preview)}>{preview ? "Edit Markdown" : "Preview"}</button></div>
+                  <span>NOTE BODY</span>
                 </div>}
-                {activeNote.deleted
-                  ? <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
-                  : preview
-                  ? <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
-                  : <textarea ref={markdownEditorRef} className="markdown-editor" value={activeNote.body} onChange={(event) => updateNote({ body: event.target.value })} placeholder={"Start with a thought…\n\nThis is your open canvas. Capture the details now; add structure when it helps you find them later."} spellCheck />}
-                {activeNote.attachmentsPath && <AttachmentList note={activeNote} onOpen={openExternal} />}
+                <div className="monaco-editor-container" style={{ height: editorBodyHeight }}>
+                  <Editor
+                    height={editorBodyHeight}
+                    language="plaintext"
+                    theme="vs-dark"
+                    value={activeNote.body}
+                    onMount={(editor) => {
+                      noteEditorRef.current = editor;
+                      setEditorBodyHeight(Math.ceil(editor.getContentHeight()));
+                      editorContentSizeListener.current?.dispose();
+                      editorContentSizeListener.current = editor.onDidContentSizeChange(({ contentHeight }) => {
+                        setEditorBodyHeight(Math.ceil(contentHeight));
+                      });
+                    }}
+                    onChange={(value) => updateNote({ body: value ?? "" })}
+                    options={{ ...editorOptions, readOnly: activeNote.deleted }}
+                  />
+                </div>
               </div>
             </section>
           )}
         </div>
 
-        <footer className="statusbar"><span><i className="online-dot" /> Local library</span><span>{snapshot.projects.length} projects</span><span>{snapshot.notes.filter((note) => !note.deleted).length} notes</span><span className="statusbar-path">{snapshot.root}</span><span>Markdown</span></footer>
+        <footer className="statusbar"><span><i className="online-dot" /> Local library</span><span>{snapshot.projects.length} projects</span><span>{snapshot.notes.filter((note) => !note.deleted).length} notes</span><button className="statusbar-path" onClick={() => void openLibraryPath(snapshot.root)} title={`Open library folder: ${snapshot.root}`}>{snapshot.root}</button></footer>
       </main>
 
       {importPaths.length > 0 && (
         <div className="modal-backdrop">
           <div className="import-dialog">
-            <div className="modal-heading"><div><p className="eyebrow">SAFE COPY IMPORT</p><h2>Choose a Project for each note</h2><p>Original files stay untouched. Files are copied into your library.</p></div><button className="icon-button" onClick={() => setImportPaths([])}>×</button></div>
+            <div className="modal-heading"><div><p className="eyebrow">SAFE COPY IMPORT</p><h2>Choose a Project for each note</h2><p>Original text files stay untouched. Copies are added to your library.</p></div><button className="icon-button" onClick={() => setImportPaths([])}>×</button></div>
             <div className="import-items">
               {importPaths.map((file) => <label className="import-item" key={file}><span className="import-file-icon">▤</span><span className="import-file-name" title={file}>{file.split(/[\\/]/).at(-1)}</span><select value={importProjects[file] || ""} onChange={(event) => setImportProjects((current) => ({ ...current, [file]: event.target.value }))}><option value="">Choose Project…</option>{snapshot.projects.map((project) => <option key={project.name}>{project.name}</option>)}</select></label>)}
             </div>
@@ -924,11 +909,10 @@ function App() {
             <div className="modal-heading"><div><p className="eyebrow">PROJECTS</p><h2 id="project-dialog-title">{projectDialog.mode === "create" ? "New project" : projectDialog.mode === "rename" ? "Rename project" : "Delete project"}</h2></div><button className="icon-button" onClick={() => setProjectDialog(null)} aria-label="Close">×</button></div>
             {projectDialog.mode === "delete" ? <>
               <div className="project-dialog-content">
-                <p>Delete <strong>{projectDialog.project?.name}</strong>? {projectDialog.project?.notes ? `${projectDialog.project.notes} note${projectDialog.project.notes === 1 ? "" : "s"} and their attachments will move to Unassigned.` : "No notes need to be moved."}</p>
-                {projectDialog.project?.files.length ? <p className="project-dialog-warning">Move or delete the project files before deleting this project.</p> : null}
+                <p>Delete <strong>{projectDialog.project?.name}</strong>? {projectDialog.project?.notes ? `${projectDialog.project.notes} note${projectDialog.project.notes === 1 ? "" : "s"} will move to Unassigned.` : "No notes need to be moved."}</p>
                 {projectDialogError && <p className="project-dialog-error" role="alert">{projectDialogError}</p>}
               </div>
-              <div className="modal-footer"><span>Notes are kept</span><div><button className="secondary-button" onClick={() => setProjectDialog(null)}>Cancel</button><button className="primary-button delete-project-button" disabled={!!projectDialog.project?.files.length} onClick={() => void submitProjectDialog()}>Delete project</button></div></div>
+              <div className="modal-footer"><span>Notes are kept</span><div><button className="secondary-button" onClick={() => setProjectDialog(null)}>Cancel</button><button className="primary-button delete-project-button" onClick={() => void submitProjectDialog()}>Delete project</button></div></div>
             </> : <form onSubmit={(event) => { event.preventDefault(); void submitProjectDialog(); }}>
               <div className="project-dialog-content">
                 <label className="project-name-label" htmlFor="project-name">Project name</label>
@@ -937,11 +921,33 @@ function App() {
                 {projectDialogError && <p className="project-dialog-error" role="alert">{projectDialogError}</p>}
                 {!projectDialogError && projectNameError && <p className="project-dialog-error" role="status">{projectNameError}</p>}
               </div>
-              <div className="modal-footer"><span>{projectDialog.mode === "create" ? "Create and open project" : "Notes and files stay in this project"}</span><div><button className="secondary-button" type="button" onClick={() => setProjectDialog(null)}>Cancel</button><button className="primary-button" disabled={!!projectNameError || !normalizedProjectName} type="submit">{projectDialog.mode === "create" ? "Create project" : "Save name"}</button></div></div>
+              <div className="modal-footer"><span>{projectDialog.mode === "create" ? "Create and open project" : "Notes stay in this project"}</span><div><button className="secondary-button" type="button" onClick={() => setProjectDialog(null)}>Cancel</button><button className="primary-button" disabled={!!projectNameError || !normalizedProjectName} type="submit">{projectDialog.mode === "create" ? "Create project" : "Save name"}</button></div></div>
             </form>}
           </section>
         </div>
       )}
+
+      {editorOptionsOpen && <div className="modal-backdrop">
+        <section className="editor-options-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-options-title">
+          <div className="modal-heading">
+            <div><p className="eyebrow">MONACO EDITOR</p><h2 id="editor-options-title">Editor options</h2></div>
+            <button className="icon-button" onClick={() => setEditorOptionsOpen(false)} aria-label="Close editor options">×</button>
+          </div>
+          <div className="editor-options-content">
+            <div className="editor-options-monaco"><Editor
+                height="100%"
+                language="json"
+                theme="vs-dark"
+                value={editorOptionsDraft}
+                onChange={(value) => setEditorOptionsDraft(value ?? "")}
+                options={{ automaticLayout: true, fixedOverflowWidgets: true, minimap: { enabled: false }, lineNumbers: "on", fontSize: 12, tabSize: 2 }}
+              /></div>
+            {editorOptionsError && <p className="project-dialog-error" role="alert">{editorOptionsError}</p>}
+            <p className="editor-options-note">readOnly is controlled by whether a note is in Trash.</p>
+          </div>
+          <div className="modal-footer"><span>Saved on this device</span><div><button className="secondary-button" onClick={() => setEditorOptionsOpen(false)}>Cancel</button><button className="primary-button" onClick={applyEditorOptions}>Apply options</button></div></div>
+        </section>
+      </div>}
     </div>
   );
 }
@@ -1003,12 +1009,6 @@ function LinkEditor({ title, links, readOnly, onOpen, onAdd, onEdit, onRemove }:
   return <div className="link-editor"><div className="field-label link-title">{title}<button disabled={readOnly} onClick={onAdd}>＋ Add</button></div>
     {links.map((link, index) => <div className="link-row" key={`${title}-${index}`}><input disabled={readOnly} value={link.label} onChange={(event) => onEdit(index, "label", event.target.value)} placeholder="Label" /><input disabled={readOnly} value={link.url} onChange={(event) => onEdit(index, "url", event.target.value)} placeholder="https://…" /><button className="open-link" disabled={!/^https?:\/\//i.test(link.url)} onClick={() => onOpen(link.url)} title="Open link in browser">↗</button><button disabled={readOnly} onClick={() => onRemove(index)}>×</button></div>)}
   </div>;
-}
-
-function AttachmentList({ note, onOpen }: { note: NoteRecord; onOpen: (path: string) => void }) {
-  const files = note.attachments;
-  if (!files.length) return null;
-  return <div className="attachment-list"><span>ATTACHMENTS</span>{files.map((file) => <button key={file} onClick={() => void onOpen(`${note.attachmentsPath}/${file}`)}>{file}</button>)}</div>;
 }
 
 function DateTree({ notes, current, onSelect }: { notes: NoteRecord[]; current: string | null; onSelect: (value: string | null) => void }) {

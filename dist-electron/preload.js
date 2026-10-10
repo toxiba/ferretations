@@ -16,10 +16,8 @@ electron_1.contextBridge.exposeInMainWorld("workspace", {
     emptyTrash: () => electron_1.ipcRenderer.invoke("trash:empty"),
     importNotes: (items) => electron_1.ipcRenderer.invoke("import:notes", items),
     chooseImportFiles: () => electron_1.ipcRenderer.invoke("import:choose-files"),
-    addFiles: (project) => electron_1.ipcRenderer.invoke("files:add", project),
     openPath: (path) => electron_1.ipcRenderer.invoke("files:open", path),
     openExternal: (url) => electron_1.ipcRenderer.invoke("links:open-external", url),
-    addAttachment: (noteId) => electron_1.ipcRenderer.invoke("attachment:add", noteId),
     onChanged: (callback) => {
         const listener = () => callback();
         electron_1.ipcRenderer.on("workspace:changed", listener);

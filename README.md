@@ -1,6 +1,6 @@
 # Super Weird Notes
 
-Super Weird Notes is a local-first desktop workspace for work notes. It stores notes as ordinary Markdown files and organizes them into Projects, so the library remains portable and readable without the app.
+Super Weird Notes is a local-first desktop workspace for plain-text notes. Notes are organized into Projects and remain readable as text files outside the app.
 
 ## Run locally
 
@@ -45,22 +45,18 @@ Choose a library folder on first launch. The app creates this layout:
 <library>/
   Projects/
     Unassigned/
-      Notes/
-      Files/
-      Attachments/
+      <note title>--<id>.txt
     <project name>/
-      Notes/
-      Files/
-      Attachments/
+      <note title>--<id>.txt
   Trash/
 ```
 
-Every note belongs to one Project. The protected `Unassigned` Project is the default for notes created from global views. Choose a Project in the sidebar to make new notes there. Notes use YAML frontmatter for their title, type, tags, lifecycle status, work-item/branch fields, links, and dates. Their body is normal Markdown. Renaming a note in the app also renames its Markdown file; moving a note changes its Project folder and moves note-specific attachments with it.
+Each text note contains a small YAML metadata header followed by its plain-text body. New notes are `.txt` files saved directly in their Project folder. Existing `.md` notes and notes in a legacy `Notes` folder remain readable; when edited, they are saved as flat `.txt` files. Empty legacy `Notes`, `Files`, and `Attachments` folders are removed when a library opens or is selected. Existing non-note files are left untouched.
 
-Supporting files are copied into a Project's `Files` area. Markdown, text, log, JSON, CSV, and YAML files are indexed for full-text search (the first 500 KB of each file); other files are searchable by name and open with the operating system's default app. Imported `.md` and `.txt` notes are copied, never moved, and must be assigned to a Project individually.
+The note editor uses Monaco with the VS Code Dark theme. Find is available with `Ctrl+F` (or `Cmd+F` on macOS); replace is available with `Ctrl+H` (or `Cmd+H`). Editor options can be changed in the app and are stored on this device. `readOnly` remains controlled by Trash state.
 
-Deleted notes and their attachments are retained under `Trash` until Trash is emptied. Projects can be renamed and only empty Projects can be deleted. Keep backups of the library folder; synchronization between devices is not built in.
+Notes autosave, support metadata and links, and can be restored from Trash. Import copies `.txt` notes into a selected Project. Keep backups of the library folder; synchronization between devices is not built in.
 
 ## Current scope
 
-The first release includes project/date/type browsing, full-text search over notes and supported Project files, Markdown editing and preview, autosave, multi-note tabs, Project metadata and links, safe import, attachments, external-file change detection, and recoverable note deletion. Templates, cloud sync, and Azure DevOps/Confluence integrations are not included.
+The first release includes project/date/type browsing, full-text note search, plain-text editing, autosave, multi-note tabs, Project metadata and links, text-note import, external-file change detection, and recoverable note deletion. Templates, cloud sync, and Azure DevOps/Confluence integrations are not included.
