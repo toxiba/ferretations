@@ -39,6 +39,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .search-icon { font-size: 22px; line-height: 1; transform: rotate(-15deg); margin-right: 9px; }
 .global-search input { flex: 1; min-width: 0; color: var(--text); border: 0; outline: 0; background: transparent; font-size: 12px; }
 .global-search input::placeholder { color: #747988; }
+.clear-search-button { flex: 0 0 22px; width: 22px; height: 22px; margin-right: 5px; padding: 0; color: #9296a2; background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 16px; line-height: 1; }
+.clear-search-button:hover { color: var(--text); background: #2a2d35; }
 kbd { color: #8d91a0; font-size: 10px; border: 1px solid #343741; border-radius: 4px; padding: 2px 5px; background: #20222a; }
 .icon-button { width: 30px; height: 30px; border: 0; background: transparent; border-radius: 6px; color: #a0a3af; cursor: pointer; font-size: 17px; display: grid; place-items: center; }
 .icon-button:hover, .icon-button.pressed { background: #292c35; color: var(--text); }
@@ -54,7 +56,7 @@ kbd { color: #8d91a0; font-size: 10px; border: 1px solid #343741; border-radius:
 .section-toggle:hover { color: #a8abb7; }
 .projects-heading { gap: 8px; }
 .projects-heading-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
-.projects-section-toggle { display: flex; align-items: center; justify-content: center; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; letter-spacing: inherit; text-align: left; }
+.projects-section-toggle { display: flex; flex: 1; align-items: center; justify-content: space-between; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; letter-spacing: inherit; text-align: left; }
 .projects-section-toggle:hover { color: #a8abb7; }
 .tiny-muted { font-size: 13px; color: #545966; }
 .tiny-action { color: #a9acb8; background: transparent; border: 0; font-size: 18px; line-height: 12px; cursor: pointer; padding: 0 2px; }
@@ -177,7 +179,7 @@ kbd { color: #8d91a0; font-size: 10px; border: 1px solid #343741; border-radius:
 .title-input:focus-visible { outline: 0; border-bottom: 1px solid #554975; }
 .metadata-inline { display: flex; align-items: center; gap: 8px; margin-bottom: 17px; padding-bottom: 16px; border-bottom: 1px solid #282a32; }
 .metadata-label { font-size: 8px; font-weight: 700; letter-spacing: .7px; color: #727683; }
-.type-input, .status-select { max-width: 130px; padding: 4px 7px; border-radius: 5px; border: 1px solid #30323b; color: #d5caff; background: #1d1f26; font-size: 9px; }
+.type-select, .status-select { max-width: 130px; padding: 4px 7px; border-radius: 5px; border: 1px solid #30323b; color: #d5caff; background: #1d1f26; font-size: 9px; }
 .status-select { color: #a0d5bd; }
 .status-label { margin-left: 12px; }
 .metadata-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
@@ -197,7 +199,13 @@ kbd { color: #8d91a0; font-size: 10px; border: 1px solid #343741; border-radius:
 .link-row button { color: #999daa; border: 0; background: transparent; cursor: pointer; }
 .link-row button.open-link { color: #b5a1ff; }
 .body-toolbar { display: flex; align-items: center; justify-content: space-between; margin: 23px 0 8px; padding-bottom: 8px; border-bottom: 1px solid #292b34; color: #858996; font-size: 8px; font-weight: 700; letter-spacing: .8px; }
-.body-toolbar > div { display: flex; gap: 8px; }
+.body-toolbar-actions { display: flex; align-items: center; gap: 8px; }
+.body-find { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 7px; background: #1b1d24; border: 1px solid #30323b; border-radius: 5px; }
+.body-find input { width: 135px; min-width: 70px; padding: 3px 0; color: #d9dae1; border: 0; outline: 0; background: transparent; font-size: 9px; }
+.body-find input::placeholder { color: #747886; }
+.body-find > span { min-width: 31px; color: #858996; font-size: 8px; text-align: center; white-space: nowrap; }
+.find-nav-button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; color: #a1a4b0; background: transparent; border: 0; border-radius: 3px; cursor: pointer; font-size: 11px; }
+.find-nav-button:hover { color: #e1e2e9; background: #2b2d36; }
 .markdown-mark { color: #a994f3; margin-left: 5px; font-size: 8px; }
 .subtle-action { color: #9699a5; border: 1px solid transparent; background: transparent; border-radius: 4px; cursor: pointer; padding: 4px 6px; font-size: 8px; }
 .subtle-action:hover, .subtle-action.on { color: #d5caff; background: #25222f; border-color: #3b344e; }

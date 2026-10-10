@@ -88,10 +88,14 @@ function App() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [bodyFindOpen, setBodyFindOpen] = useState(false);
+  const [bodyFindQuery, setBodyFindQuery] = useState("");
+  const [bodyFindMatchIndex, setBodyFindMatchIndex] = useState(-1);
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [conflicts, setConflicts] = useState<Set<string>>(new Set());
   const [missingNotes, setMissingNotes] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState(false);
+  const [noteDetailsCollapsed, setNoteDetailsCollapsed] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [workspaceRestored, setWorkspaceRestored] = useState(false);
@@ -99,6 +103,7 @@ function App() {
   const [importProjects, setImportProjects] = useState<Record<string, string>>({});
   const [renderedMarkdown, setRenderedMarkdown] = useState("");
   const markdownEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const bodyFindInputRef = useRef<HTMLInputElement | null>(null);
   const autosaveTimer = useRef<number | undefined>(undefined);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -176,6 +181,15 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && activeNote && !activeNote.deleted) {
+        event.preventDefault();
+        setBodyFindOpen(true);
+        setPreview(false);
+      }
+      if (bodyFindOpen && event.key === "Enter") {
+        event.preventDefault();
+        moveToBodyFindMatch(event.shiftKey ? -1 : 1);
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         document.querySelector<HTMLInputElement>(".global-search input")?.focus();
@@ -184,7 +198,10 @@ function App() {
         event.preventDefault();
         void createNote();
       }
-      if (event.key === "Escape") setOpenProjectMenu(null);
+      if (event.key === "Escape") {
+        setOpenProjectMenu(null);
+        if (bodyFindOpen) setBodyFindOpen(false);
+      }
       if (event.key === "Escape" && document.activeElement?.classList.contains("global-search")) {
         setSearch("");
         document.activeElement instanceof HTMLElement && document.activeElement.blur();
@@ -193,6 +210,10 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   });
+
+  useEffect(() => {
+    if (bodyFindOpen) bodyFindInputRef.current?.focus();
+  }, [bodyFindOpen]);
 
   useEffect(() => {
     for (const key of Object.keys(localStorage)) {
@@ -226,6 +247,36 @@ function App() {
   }, [tabs, selectedId, projectFilter, view, workspaceRestored]);
 
   const activeNote = selectedId ? drafts[selectedId] : undefined;
+  useEffect(() => {
+    setBodyFindOpen(false);
+    setBodyFindQuery("");
+    setBodyFindMatchIndex(-1);
+  }, [selectedId]);
+
+  const bodyFindMatches = useMemo(() => {
+    if (!activeNote || !bodyFindQuery) return [];
+    const body = activeNote.body.toLocaleLowerCase();
+    const query = bodyFindQuery.toLocaleLowerCase();
+    const matches: number[] = [];
+    let position = 0;
+    while ((position = body.indexOf(query, position)) !== -1) {
+      matches.push(position);
+      position += query.length;
+    }
+    return matches;
+  }, [activeNote?.body, bodyFindQuery]);
+
+  const moveToBodyFindMatch = (direction: number) => {
+    if (!bodyFindMatches.length) return;
+    const nextIndex = bodyFindMatchIndex < 0
+      ? direction > 0 ? 0 : bodyFindMatches.length - 1
+      : (bodyFindMatchIndex + direction + bodyFindMatches.length) % bodyFindMatches.length;
+    setBodyFindMatchIndex(nextIndex);
+    const editor = markdownEditorRef.current;
+    const start = bodyFindMatches[nextIndex];
+    editor?.focus();
+    editor?.setSelectionRange(start, start + bodyFindQuery.length);
+  };
 
   useLayoutEffect(() => {
     const editor = markdownEditorRef.current;
@@ -632,6 +683,7 @@ function App() {
             setSearch(event.target.value);
             if (event.target.value.trim()) setResultsVisible(true);
           }} placeholder="Search notes, work items, branches, files…" />
+          {search && <button className="clear-search-button" onClick={() => setSearch("")} title="Clear search" aria-label="Clear search">×</button>}
           <kbd>⌘ K</kbd>
         </div>
         <button className="icon-button new-note-button" onClick={() => void createNote()} title="New note" aria-label="New note">＋</button>
@@ -681,12 +733,11 @@ function App() {
 
           <div className="side-section projects-section">
             <div className="section-label projects-heading">
-              <span>PROJECTS</span>
+              <button className="projects-section-toggle" onClick={() => setProjectsCollapsed(!projectsCollapsed)} aria-expanded={!projectsCollapsed} aria-label={`${projectsCollapsed ? "Expand" : "Collapse"} Projects`} title={`${projectsCollapsed ? "Expand" : "Collapse"} Projects`}>
+                <span>PROJECTS</span><span className="tiny-muted">{projectsCollapsed ? "›" : "⌄"}</span>
+              </button>
               <div className="projects-heading-actions">
                 <button className="tiny-action" onClick={openCreateProject} title="New Project" aria-label="New project">＋</button>
-                <button className="projects-section-toggle" onClick={() => setProjectsCollapsed(!projectsCollapsed)} aria-expanded={!projectsCollapsed} title={`${projectsCollapsed ? "Expand" : "Collapse"} Projects`} aria-label={`${projectsCollapsed ? "Expand" : "Collapse"} Projects`}>
-                  <span className="tiny-muted">{projectsCollapsed ? "›" : "⌄"}</span>
-                </button>
               </div>
             </div>
             {!projectsCollapsed && snapshot.projects.map((project) => (
@@ -785,6 +836,7 @@ function App() {
                       ? <span className="save-indicator"><i /> {activeConflict ? "Conflict" : "Saving…"}</span>
                       : <span className="save-indicator saved"><i /> Saved</span>}
                   {!activeNote.deleted && <button className={`icon-button ${preview ? "pressed" : ""}`} onClick={() => setPreview(!preview)} title="Toggle Markdown preview">◫</button>}
+                  {!activeNote.deleted && <button className={`icon-button ${noteDetailsCollapsed ? "pressed" : ""}`} onClick={() => setNoteDetailsCollapsed(!noteDetailsCollapsed)} title={`${noteDetailsCollapsed ? "Show" : "Hide"} note details`} aria-label={`${noteDetailsCollapsed ? "Show" : "Hide"} note details`} aria-pressed={!noteDetailsCollapsed}>{noteDetailsCollapsed ? "▤" : "▱"}</button>}
                   {activeNote.deleted
                     ? <button className="secondary-button restore-button" onClick={() => void restoreSelected()}>Restore note</button>
                     : <button className="icon-button danger-text" onClick={() => void deleteSelected()} title="Move note to Trash">⌑</button>}
@@ -811,20 +863,33 @@ function App() {
                   <span className="editor-project">{activeNote.project} <span>·</span> {formatDate(activeNote.createdAt)}</span>
                   {activeNote.fileNameMismatch && <div className="filename-warning">The filename was changed outside the app. The stored title and external filename are both preserved.</div>}
                   <input className="title-input" disabled={activeNote.deleted} value={activeNote.title} onChange={(event) => updateNote({ title: event.target.value })} aria-label="Note title" />
-                  <div className="metadata-inline">
-                    <label className="metadata-label">TYPE</label>
-                    <input className="type-input" disabled={activeNote.deleted} list="note-types" placeholder="Unclassified" value={activeNote.type} onChange={(event) => updateNote({ type: event.target.value })} />
-                    <datalist id="note-types">{snapshot.noteTypes.map((type) => <option key={type} value={type} />)}</datalist>
-                    <label className="metadata-label status-label">STATUS</label>
-                    <select className="status-select" disabled={activeNote.deleted} value={activeNote.status} onChange={(event) => updateNote({ status: event.target.value as NoteRecord["status"] })}>
-                      <option>Active</option><option>Completed</option><option>Archived</option>
-                    </select>
-                  </div>
-                  <MetadataEditor note={activeNote} projects={snapshot.projects} knownTags={[...new Set(snapshot.notes.flatMap((item) => item.tags))]} readOnly={activeNote.deleted} onOpenExternal={(url) => void openWebLink(url)} onChange={updateNote} />
+                  {!noteDetailsCollapsed && <>
+                    <div className="metadata-inline">
+                      <label className="metadata-label" htmlFor="note-type">TYPE</label>
+                      <select id="note-type" className="type-select" disabled={activeNote.deleted} value={activeNote.type} onChange={(event) => updateNote({ type: event.target.value })}>
+                        <option value="">Unclassified</option>
+                        {activeNote.type && !snapshot.noteTypes.includes(activeNote.type) && <option value={activeNote.type}>{activeNote.type}</option>}
+                        {snapshot.noteTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                      <label className="metadata-label status-label" htmlFor="note-status">STATUS</label>
+                      <select id="note-status" className="status-select" disabled={activeNote.deleted} value={activeNote.status} onChange={(event) => updateNote({ status: event.target.value as NoteRecord["status"] })}>
+                        <option>Active</option><option>Completed</option><option>Archived</option>
+                      </select>
+                    </div>
+                    <MetadataEditor note={activeNote} projects={snapshot.projects} knownTags={[...new Set(snapshot.notes.flatMap((item) => item.tags))]} readOnly={activeNote.deleted} onOpenExternal={(url) => void openWebLink(url)} onChange={updateNote} />
+                  </>}
                 </div>
                 {!activeNote.deleted && <div className="body-toolbar">
                   <span>NOTE BODY <span className="markdown-mark">M↓</span></span>
-                  <div><button className="subtle-action" onClick={() => void addAttachment()}>＋ Attach</button>
+                  <div className="body-toolbar-actions">
+                    {bodyFindOpen && <div className="body-find" role="search">
+                      <input ref={bodyFindInputRef} value={bodyFindQuery} onChange={(event) => { setBodyFindQuery(event.target.value); setBodyFindMatchIndex(-1); }} placeholder="Find in note…" aria-label="Find in note body" />
+                      <span>{bodyFindQuery ? `${Math.max(bodyFindMatchIndex + 1, 0)} / ${bodyFindMatches.length}` : ""}</span>
+                      <button className="find-nav-button" onClick={() => moveToBodyFindMatch(-1)} title="Previous match" aria-label="Previous match">↑</button>
+                      <button className="find-nav-button" onClick={() => moveToBodyFindMatch(1)} title="Next match" aria-label="Next match">↓</button>
+                      <button className="find-nav-button" onClick={() => setBodyFindOpen(false)} title="Close find" aria-label="Close find">×</button>
+                    </div>}
+                    <button className="subtle-action" onClick={() => void addAttachment()}>＋ Attach</button>
                     <button className={`subtle-action ${preview ? "on" : ""}`} onClick={() => setPreview(!preview)}>{preview ? "Edit Markdown" : "Preview"}</button></div>
                 </div>}
                 {activeNote.deleted
